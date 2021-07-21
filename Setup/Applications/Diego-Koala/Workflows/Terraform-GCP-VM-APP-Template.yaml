@@ -1,0 +1,320 @@
+harnessApiVersion: '1.0'
+type: CANARY
+concurrencyStrategy: INFRA
+envName: GCP-VM
+failureStrategies:
+- executionScope: WORKFLOW
+  failureTypes:
+  - APPLICATION_ERROR
+  repairActionCode: ROLLBACK_WORKFLOW
+  retryCount: 0
+notificationRules:
+- conditions:
+  - FAILED
+  executionScope: WORKFLOW
+  notificationGroupAsExpression: false
+  userGroupAsExpression: false
+  userGroupNames:
+  - Account Administrator
+phases:
+- type: SSH
+  computeProviderName: Diego Physical Data Center
+  daemonSet: false
+  infraDefinitionName: Infra-Auto-GCP-Instance-1
+  name: Deploy Node App
+  phaseSteps:
+  - type: INFRASTRUCTURE_NODE
+    name: Prepare Infra
+    steps:
+    - type: DC_NODE_SELECT
+      name: Select Nodes
+      properties:
+        excludeSelectedHostsFromFuturePhases: true
+        instanceCount: 1
+        instanceUnitType: COUNT
+        specificHosts: false
+        templateUuid: null
+        templateVariables: null
+        templateVersion: null
+    stepsInParallel: false
+  - type: DISABLE_SERVICE
+    name: Disable Service
+    stepsInParallel: false
+  - type: DEPLOY_SERVICE
+    name: Deploy Service
+    steps:
+    - type: COMMAND
+      name: Copy and Expand Node App
+      properties:
+        commandName: Copy and Expand Node App
+        delegateSelectors:
+        - diego-koala-delegate
+        templateUuid: null
+        templateVariables: null
+        templateVersion: null
+        timeoutMillis: 300000
+    - type: COMMAND
+      name: Start Node App
+      properties:
+        commandName: Start Node App
+        templateUuid: null
+        templateVariables: null
+        templateVersion: null
+        timeoutMillis: 300000
+    stepsInParallel: false
+  - type: ENABLE_SERVICE
+    name: Enable Service
+    stepsInParallel: false
+  - type: VERIFY_SERVICE
+    name: Verify Service
+    stepsInParallel: false
+  - type: WRAP_UP
+    name: Wrap Up
+    stepsInParallel: false
+  provisionNodes: false
+  serviceName: Diego NodeJS MongoDB Employee APP
+  serviceVariableOverrides:
+  - name: host
+    value: ${terraform.public_ip}
+  statefulSet: false
+postDeploymentSteps:
+- type: HTTP
+  name: Check Harness APP
+  properties:
+    assertion: ''
+    body: ''
+    executeWithPreviousSteps: false
+    method: GET
+    publishAsVar: false
+    responseProcessingExpressions: ''
+    sweepingOutputName: null
+    sweepingOutputScope: null
+    tags:
+    - diego-koala-delegate
+    templateUuid: null
+    templateVariables: null
+    templateVersion: null
+    timeoutMillis: 10000
+    url: http://${terraform.public_ip}:3000
+    useProxy: false
+- type: TERRAFORM_DESTROY
+  name: Terraform Destroy Plan
+  properties:
+    delegateTag: diego-koala-delegate
+    inheritApprovedPlan: false
+    provisionerName: Diego-Terraform
+    runPlanOnly: true
+    templateUuid: null
+    templateVariables: null
+    templateVersion: null
+    tfVarGitFileConfig: null
+    timeoutMillis: 300000
+    workspace: ''
+- type: APPROVAL
+  name: Terraform Destroy Approval
+  properties:
+    approvalStateType: USER_GROUP
+    templateUuid: null
+    templateVariables: null
+    templateVersion: null
+    timeoutMillis: 86400000
+    userGroupNames:
+    - Account Administrator
+    - AP-DEV
+    - AP-PROD
+- type: TERRAFORM_DESTROY
+  name: Terraform Destroy
+  properties:
+    delegateTag: diego-koala-delegate
+    inheritApprovedPlan: true
+    provisionerName: Diego-Terraform
+    runPlanOnly: false
+    templateUuid: null
+    templateVariables: null
+    templateVersion: null
+    tfVarGitFileConfig: null
+    timeoutMillis: 300000
+    workspace: ''
+preDeploymentStepSkipStrategy:
+- assertionExpression: ${workflow.variables.InfraType} == "AWS"
+  scope: SPECIFIC_STEPS
+  steps:
+  - Terraform Plan
+  - Terraform Apply
+  - Terraform Vars
+  - GCP Shell Script Provision
+preDeploymentSteps:
+- type: TERRAFORM_APPLY
+  name: Terraform Plan
+  properties:
+    backendConfigs: null
+    delegateTag: diego-koala-delegate
+    environmentVariables: null
+    exportPlanToApplyStep: true
+    inheritApprovedPlan: false
+    name: Terraform Plan
+    provisionerName: Diego-Terraform
+    runPlanOnly: true
+    targets: null
+    templateUuid: null
+    templateVariables: null
+    templateVersion: null
+    tfVarFiles: ''
+    tfVarGitFileConfig: null
+    timeoutMillis: 600000
+    variables:
+    - name: zone
+      valueType: TEXT
+      value: us-central1-a
+    - name: gcp_sa
+      value: ${secrets.getValue("Diego-Personal-GCP-SA")}
+      valueType: TEXT
+    - name: ssh_keys
+      value: ${secrets.getValue("Diego-Text-SSH")}
+      valueType: TEXT
+    - name: project
+      value: diego-terraform
+      valueType: TEXT
+    - name: region
+      value: us-central1
+      valueType: TEXT
+    - name: instance_type
+      value: f1-micro
+      valueType: TEXT
+    workspace: ''
+- type: TERRAFORM_APPLY
+  name: Terraform Apply
+  properties:
+    delegateTag: ''
+    exportPlanToApplyStep: false
+    inheritApprovedPlan: true
+    name: Terraform Apply
+    provisionerName: Diego-Terraform
+    runPlanOnly: false
+    templateUuid: null
+    templateVariables: null
+    templateVersion: null
+    tfVarFiles: ''
+    tfVarGitFileConfig: null
+    timeoutMillis: 600000
+    workspace: ''
+- type: SHELL_SCRIPT
+  name: Terraform Vars
+  properties:
+    commandPath: null
+    connectionAttributeName: null
+    delegateSelectors:
+    - diego-koala-delegate
+    executeOnDelegate: true
+    host: null
+    outputVars: ''
+    publishAsVar: false
+    scriptString: echo ${terraform.public_ip}
+    scriptType: BASH
+    sshKeyRefName: null
+    sweepingOutputName: null
+    sweepingOutputScope: null
+    tags: null
+    templateExpressions: null
+    templateUuid: null
+    templateVariables: null
+    templateVersion: null
+    timeoutMillis: 60000
+- type: ARTIFACT_CHECK
+  name: Artifact Check
+  properties:
+    templateUuid: null
+    templateVariables: null
+    templateVersion: null
+- type: SHELL_SCRIPT_PROVISION
+  name: GCP Shell Script Provision
+  properties:
+    backendConfigs: null
+    delegateSelectors:
+    - diego-koala-delegate
+    provisionerName: List GCP Instances
+    templateUuid: null
+    templateVariables: null
+    templateVersion: null
+    variables:
+    - name: public_ip
+      value: ${terraform.public_ip}
+      valueType: TEXT
+- type: SHELL_SCRIPT
+  name: Slack Notification Pipeline Workflow
+  properties:
+    executeOnDelegate: true
+    timeoutMillis: 600000
+  templateUri: Harness SE/Diego/Slack Notification Pipeline Workflow:latest
+  templateVariables:
+  - name: Message
+    value: Deployment started
+  - name: App
+    value: ${app.name}
+  - name: Workflow
+    value: ${workflow.name}
+  - name: Pipeline
+    value: ${pipeline.name}
+  - name: triggered
+    value: ${deploymentTriggeredBy}
+  - name: deploymentURL
+    value: ${deploymentUrl}
+  - name: Type
+    value: Workflow
+  - name: style
+    value: alert
+  - name: Title
+    value: Deployed triggered by ${deploymentTriggeredBy}
+rollbackPhases:
+- type: SSH
+  computeProviderName: Diego Physical Data Center
+  daemonSet: false
+  infraDefinitionName: Infra-Auto-GCP-Instance-1
+  name: Rollback Deploy Node App
+  phaseNameForRollback: Deploy Node App
+  phaseSteps:
+  - type: DISABLE_SERVICE
+    name: Disable Service
+    phaseStepNameForRollback: Enable Service
+    statusForRollback: SUCCESS
+    stepsInParallel: false
+  - type: STOP_SERVICE
+    name: Stop Service
+    phaseStepNameForRollback: Deploy Service
+    statusForRollback: SUCCESS
+    stepsInParallel: false
+  - type: DEPLOY_SERVICE
+    name: Deploy Service
+    phaseStepNameForRollback: Deploy Service
+    statusForRollback: SUCCESS
+    stepsInParallel: false
+  - type: ENABLE_SERVICE
+    name: Enable Service
+    phaseStepNameForRollback: Disable Service
+    statusForRollback: SUCCESS
+    stepsInParallel: false
+  - type: VERIFY_SERVICE
+    name: Verify Service
+    phaseStepNameForRollback: Deploy Service
+    statusForRollback: SUCCESS
+    stepsInParallel: false
+  - type: WRAP_UP
+    name: Wrap Up
+    stepsInParallel: false
+  provisionNodes: false
+  serviceName: Diego NodeJS MongoDB Employee APP
+  statefulSet: false
+templatized: true
+userVariables:
+- type: TEXT
+  allowedValues: f1-micro, t2.micro , t2.xlarge
+  fixed: false
+  mandatory: true
+  name: instance_type
+  value: f1-micro
+- type: TEXT
+  allowedValues: AWS,GCP
+  fixed: false
+  mandatory: true
+  name: InfraType
+  value: AWS

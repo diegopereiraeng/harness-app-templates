@@ -1,0 +1,42 @@
+harnessApiVersion: '1.0'
+type: SETUP
+commandUnitType: COMMAND
+commandUnits:
+- command: |-
+    echo "Downloading artifact from ${artifact.metadata.URL}"
+
+    echo "Name: ${artifact.metadata.NAME}"
+
+    sudo rm -f EmployeeKoalaDB.tar
+
+    wget ${artifact.metadata.URL}
+
+    ls
+
+    echo "Download Finished"
+
+    echo "Next Step: Expand ${artifact.fileName} ${artifact.buildNo} uploaded by ${artifact.source.username}"
+
+    #echo "Installing zip"
+    #sudo apt-get -y install zip
+    #echo "zip installed"
+  commandUnitType: EXEC
+  deploymentType: SSH
+  name: Download Artifact
+  scriptType: BASH
+  workingDirectory: ${app.defaults.RUNTIME_PATH}
+- command: |
+    echo "Expanding artifact ${artifact.metadata.NAME}"
+
+    pwd
+
+    ls -ltr
+
+    #sudo unzip EmployeeKoalaDB.zip
+    tar -xzvf EmployeeKoalaDB.tar
+  commandUnitType: EXEC
+  deploymentType: SSH
+  name: Expand Artifact
+  scriptType: BASH
+  workingDirectory: ${app.defaults.RUNTIME_PATH}
+targetToAllEnv: true

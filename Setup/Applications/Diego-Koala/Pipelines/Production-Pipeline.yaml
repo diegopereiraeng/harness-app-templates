@@ -1,0 +1,75 @@
+harnessApiVersion: '1.0'
+type: PIPELINE
+pipelineStages:
+- type: ENV_STATE
+  name: Deploy DEV
+  parallel: false
+  skipCondition:
+    type: DO_NOT_SKIP
+  stageName: STAGE 1
+  workflowName: Deploy-HTTP-Tests
+  workflowVariables:
+  - name: API_URL
+    value: http://${context.api_service.URL}
+  - entityType: SERVICE
+    name: Service
+    value: ${Service}
+  - entityType: INFRASTRUCTURE_DEFINITION
+    name: InfraDefinition_DEV
+    value: Diego-GKE-DEV
+- type: ENV_STATE
+  name: Deploy QA
+  parallel: false
+  skipCondition:
+    type: DO_NOT_SKIP
+  stageName: STAGE 2
+  workflowName: QA-Workflow
+  workflowVariables:
+  - name: API_URL
+    value: http://${context.api_service.URL}:8080
+  - entityType: INFRASTRUCTURE_DEFINITION
+    name: InfraDefinition_QA
+    value: Diego-GKE-QA
+  - entityType: SERVICE
+    name: Service
+    value: ${Service}
+  - name: TEST_SCRIPT
+    value: selenium-checker.py
+- type: APPROVAL
+  name: Approval 2
+  parallel: false
+  properties:
+    userGroups:
+    - Account Administrator
+    workflowVariables: null
+    stageName: STAGE 3
+    timeoutMillis: 1800000
+    approvalStateType: USER_GROUP
+    sweepingOutputName: ''
+  skipCondition:
+    type: DO_NOT_SKIP
+  stageName: STAGE 3
+- type: ENV_STATE
+  name: Deploy Canary-Verification
+  parallel: false
+  skipCondition:
+    type: DO_NOT_SKIP
+  stageName: STAGE 4
+  workflowName: Canary-Verification
+  workflowVariables:
+  - entityType: INFRASTRUCTURE_DEFINITION
+    name: INFRA-PROD
+    value: ${Infra-Prod}
+  - name: API_URL
+    value: http://${context.api_service.URL}:8080
+  - entityType: ENVIRONMENT
+    name: Environment
+    value: PROD
+  - entityType: SERVICE
+    name: Service
+    value: ${Service}
+  - name: TEST_SCRIPT
+    value: selenium-checker.py
+tags:
+  Selenium: 'True'
+  verification_enabled: ''

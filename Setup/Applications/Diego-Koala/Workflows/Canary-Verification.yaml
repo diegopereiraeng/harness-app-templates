@@ -1,0 +1,419 @@
+harnessApiVersion: '1.0'
+type: CANARY
+concurrencyStrategy: INFRA
+envName: PROD
+failureStrategies:
+- executionScope: WORKFLOW
+  failureTypes:
+  - APPLICATION_ERROR
+  repairActionCode: ROLLBACK_WORKFLOW
+  retryCount: 0
+notificationRules:
+- conditions:
+  - FAILED
+  executionScope: WORKFLOW
+  notificationGroupAsExpression: false
+  userGroupAsExpression: false
+  userGroupNames:
+  - Account Administrator
+phases:
+- type: KUBERNETES
+  computeProviderName: Kubernetes Cluster Diego-GKE
+  daemonSet: false
+  name: Canary
+  phaseSteps:
+  - type: K8S_PHASE_STEP
+    name: Deploy
+    steps:
+    - type: K8S_CANARY_DEPLOY
+      name: Canary Deployment
+      properties:
+        instanceUnitType: COUNT
+        instances: '1'
+        stateTimeoutInMinutes: 10
+        templateUuid: null
+        templateVariables: null
+        templateVersion: null
+    stepsInParallel: false
+  - type: K8S_PHASE_STEP
+    name: Verify
+    steps:
+    - type: SHELL_SCRIPT
+      name: Get LoadBalancer IP
+      properties:
+        commandPath: null
+        connectionAttributeName: null
+        delegateSelectors:
+        - diego-koala
+        executeOnDelegate: true
+        host: null
+        outputVars: URL
+        publishAsVar: true
+        scriptString: |
+          echo "Getting External LoadBalancer IP"
+
+          export URL=$(kubectl get svc ${service.name} -n ${infra.kubernetes.namespace} --template="{{range .status.loadBalancer.ingress}}{{.ip}}{{end}}") # Get the load balancer from k8s service
+
+          sleep 2
+
+          echo "External LoadBalancer IP: $URL"
+        scriptType: BASH
+        secretOutputVars: ''
+        sshKeyRefName: null
+        sweepingOutputName: api_service_prod
+        sweepingOutputScope: PIPELINE
+        templateExpressions: null
+        templateUuid: null
+        templateVariables: null
+        templateVersion: null
+        timeoutMillis: 60000
+    - type: SHELL_SCRIPT
+      name: Load
+      properties:
+        commandPath: null
+        connectionAttributeName: null
+        delegateSelectors:
+        - diego-koala
+        executeOnDelegate: true
+        host: null
+        outputVars: ''
+        publishAsVar: false
+        scriptString: |-
+          export TESTURL=${workflow.variables.API_URL}
+          rm -rf java-restful-web-services
+          git clone https://github.com/diegopereiraeng/java-restful-web-services
+          python java-restful-web-services/${workflow.variables.TEST_SCRIPT} $TESTURL 100
+          python java-restful-web-services/${workflow.variables.TEST_SCRIPT} $TESTURL 100
+        scriptType: BASH
+        sshKeyRefName: null
+        sweepingOutputName: null
+        sweepingOutputScope: null
+        templateExpressions: null
+        templateUuid: null
+        templateVariables: null
+        templateVersion: null
+        timeoutMillis: 300000
+    - type: DATA_DOG
+      name: Datadog Metrics
+      properties:
+        analysisServerConfigId: UgyUhvKnS3akwdXfYQfEMA
+        analysisTolerance: LOW
+        comparisonStrategy: COMPARE_WITH_CURRENT
+        executeWithPreviousSteps: true
+        hostnameTemplate: ${instance.hostName}
+        metrics: docker.cpu.usage,docker.cpu.throttled,docker.mem.rss
+        templateUuid: null
+        templateVariables: null
+        templateVersion: null
+        timeDuration: 5
+    stepsInParallel: false
+  - type: K8S_PHASE_STEP
+    name: Wrap Up
+    steps:
+    - type: K8S_DELETE
+      name: Canary Delete
+      properties:
+        instanceUnitType: COUNT
+        resources: ${k8s.canaryWorkload}
+    stepsInParallel: false
+  provisionNodes: false
+  serviceName: diego-java-springboot-service
+  statefulSet: false
+  templateExpressions:
+  - expression: ${INFRA-PROD}
+    fieldName: infraDefinitionId
+    metadata:
+    - name: artifactType
+      value: DOCKER
+    - name: entityType
+      value: INFRASTRUCTURE_DEFINITION
+  - expression: ${Service}
+    fieldName: serviceId
+    metadata:
+    - name: relatedField
+    - name: artifactType
+      value: DOCKER
+    - name: entityType
+      value: SERVICE
+- type: KUBERNETES
+  computeProviderName: Kubernetes Cluster Diego-GKE
+  daemonSet: false
+  name: Primary
+  phaseSteps:
+  - type: K8S_PHASE_STEP
+    name: Deploy
+    steps:
+    - type: K8S_DEPLOYMENT_ROLLING
+      name: Rollout Deployment
+    stepsInParallel: false
+  - type: K8S_PHASE_STEP
+    name: Verify
+    steps:
+    - type: HTTP
+      name: Internal HTTP Root HealthCheck
+      properties:
+        assertion: ${httpResponseCode}==200
+        body: ''
+        executeWithPreviousSteps: false
+        method: GET
+        publishAsVar: true
+        responseProcessingExpressions: ''
+        sweepingOutputName: prod-http-test
+        sweepingOutputScope: PIPELINE
+        tags:
+        - diego-koala-delegate
+        templateUuid: null
+        templateVariables: null
+        templateVersion: null
+        timeoutMillis: 10000
+        url: http://${service.name}.${infra.kubernetes.namespace}.svc.cluster.local:8080
+        useProxy: false
+    - type: DATA_DOG
+      name: Datadog Metrics
+      properties:
+        analysisServerConfigId: UgyUhvKnS3akwdXfYQfEMA
+        analysisTolerance: MEDIUM
+        comparisonStrategy: COMPARE_WITH_CURRENT
+        executeWithPreviousSteps: true
+        hostnameTemplate: ${instance.hostName}
+        metrics: docker.cpu.usage,docker.mem.rss,kubernetes.cpu.usage.total,kubernetes.memory.usage_pct
+        templateUuid: null
+        templateVariables: null
+        templateVersion: null
+        timeDuration: 5
+    stepsInParallel: false
+  - type: K8S_PHASE_STEP
+    name: Wrap Up
+    steps:
+    - type: JIRA_CREATE_UPDATE
+      name: Evidence Export
+      properties:
+        comment: Successful tested using Datadog.
+        customFields: null
+        description: |-
+          HTTP Test Result:
+
+          ResponseCode: ${context.prod-http-test.httpResponseCode}
+          Response Body: ${context.http-prod-test.httpResponseBody}
+        issueId: ${jira_production.issueId}
+        issueType: Change
+        jiraAction: UPDATE_TICKET
+        jiraConnectorName: Jira Demo Copy
+        labels:
+        - ''
+        priority: P1
+        project: HD
+        publishAsVar: false
+        status: QA Test
+        summary: ''
+        templateUuid: null
+        templateVariables: null
+        templateVersion: null
+    stepsInParallel: false
+  provisionNodes: false
+  serviceName: diego-java-springboot-service
+  statefulSet: false
+  templateExpressions:
+  - expression: ${INFRA-PROD}
+    fieldName: infraDefinitionId
+    metadata:
+    - name: artifactType
+      value: DOCKER
+    - name: entityType
+      value: INFRASTRUCTURE_DEFINITION
+  - expression: ${Service}
+    fieldName: serviceId
+    metadata:
+    - name: relatedField
+    - name: artifactType
+      value: DOCKER
+    - name: entityType
+      value: SERVICE
+postDeploymentSteps:
+- type: JIRA_CREATE_UPDATE
+  name: Close the change request
+  properties:
+    comment: Deployment successful implemented in production
+    customFields: null
+    description: ${deploymentUrl}
+    issueId: ${jira_production.issueId}
+    issueType: Change
+    jiraAction: UPDATE_TICKET
+    jiraConnectorName: Jira Demo Copy
+    labels:
+    - ''
+    priority: P1
+    project: HD
+    publishAsVar: false
+    status: Done
+    summary: ''
+    templateUuid: null
+    templateVariables: null
+    templateVersion: null
+preDeploymentSteps:
+- type: JIRA_CREATE_UPDATE
+  name: Jira Change Request Start
+  properties:
+    comment: 'Starting deployment in production using pipeline:  ${pipeline.name}
+      and Workflow: ${workflow.name} on Infra: ${workflow.variables.InfraDefinition_Kubernetes}'
+    customFields: null
+    description: |
+      Trigger: ${deploymentTriggeredBy}
+    issueId: ${jira_production.issueId}
+    issueType: Change
+    jiraAction: UPDATE_TICKET
+    jiraConnectorName: Jira Demo Copy
+    labels:
+    - ''
+    priority: P1
+    project: HD
+    publishAsVar: false
+    status: In Progress
+    summary: ''
+    templateUuid: null
+    templateVariables: null
+    templateVersion: null
+rollbackPhases:
+- type: KUBERNETES
+  daemonSet: false
+  name: Rollback Canary
+  phaseNameForRollback: Canary
+  phaseSteps:
+  - type: K8S_PHASE_STEP
+    name: Deploy
+    phaseStepNameForRollback: Deploy
+    statusForRollback: SUCCESS
+    steps:
+    - type: JIRA_CREATE_UPDATE
+      name: Jira
+      properties:
+        comment: 'Failed to deploy in production using pipeline:  ${pipeline.name}
+          and Workflow: ${workflow.name} on Infra: ${workflow.variables.InfraDefinition_Kubernetes}'
+        customFields: null
+        description: ''
+        issueId: ${jira_production.issueId}
+        issueType: Change
+        jiraAction: UPDATE_TICKET
+        jiraConnectorName: Jira Demo Copy
+        labels:
+        - ''
+        priority: P1
+        project: HD
+        publishAsVar: false
+        status: Rejected
+        summary: ''
+    stepsInParallel: false
+  - type: K8S_PHASE_STEP
+    name: Wrap Up
+    phaseStepNameForRollback: Wrap Up
+    stepsInParallel: false
+  provisionNodes: false
+  serviceName: diego-java-springboot-service
+  statefulSet: false
+  templateExpressions:
+  - expression: ${INFRA-PROD}
+    fieldName: infraDefinitionId
+    metadata:
+    - name: artifactType
+      value: DOCKER
+    - name: entityType
+      value: INFRASTRUCTURE_DEFINITION
+  - expression: ${Service}
+    fieldName: serviceId
+    metadata:
+    - name: relatedField
+    - name: artifactType
+      value: DOCKER
+    - name: entityType
+      value: SERVICE
+- type: KUBERNETES
+  daemonSet: false
+  name: Rollback Primary
+  phaseNameForRollback: Primary
+  phaseSteps:
+  - type: K8S_PHASE_STEP
+    name: Deploy
+    phaseStepNameForRollback: Deploy
+    statusForRollback: SUCCESS
+    steps:
+    - type: K8S_DEPLOYMENT_ROLLING_ROLLBACK
+      name: Rollback Deployment
+    - type: JIRA_CREATE_UPDATE
+      name: Jira
+      properties:
+        comment: 'Failed to deploy in production using pipeline:  ${pipeline.name}
+          and Workflow: ${workflow.name} on Infra: ${workflow.variables.InfraDefinition_Kubernetes}'
+        customFields: null
+        description: ''
+        issueId: ${jira_production.issueId}
+        issueType: Change
+        jiraAction: UPDATE_TICKET
+        jiraConnectorName: Jira Demo Copy
+        labels:
+        - ''
+        priority: P1
+        project: HD
+        publishAsVar: false
+        status: ''
+        summary: ''
+        templateUuid: null
+        templateVariables: null
+        templateVersion: null
+    stepsInParallel: false
+  - type: K8S_PHASE_STEP
+    name: Wrap Up
+    phaseStepNameForRollback: Wrap Up
+    stepsInParallel: false
+  provisionNodes: false
+  serviceName: diego-java-springboot-service
+  statefulSet: false
+  templateExpressions:
+  - expression: ${INFRA-PROD}
+    fieldName: infraDefinitionId
+    metadata:
+    - name: artifactType
+      value: DOCKER
+    - name: entityType
+      value: INFRASTRUCTURE_DEFINITION
+  - expression: ${Service}
+    fieldName: serviceId
+    metadata:
+    - name: relatedField
+    - name: artifactType
+      value: DOCKER
+    - name: entityType
+      value: SERVICE
+templateExpressions:
+- expression: ${Environment}
+  fieldName: envId
+  metadata:
+  - name: relatedField
+  - name: entityType
+    value: ENVIRONMENT
+templatized: true
+userVariables:
+- type: ENTITY
+  description: Variable for Environment entity
+  fixed: false
+  mandatory: true
+  name: Environment
+- type: ENTITY
+  description: Variable for Service entity in Rollback Primary
+  fixed: false
+  mandatory: true
+  name: Service
+- type: ENTITY
+  description: Variable for Infrastructure Definition entity in Rollback Primary
+  fixed: false
+  mandatory: true
+  name: INFRA-PROD
+- type: TEXT
+  fixed: false
+  mandatory: true
+  name: API_URL
+  value: http://${context.api_service.URL}:8080
+- type: TEXT
+  fixed: false
+  mandatory: true
+  name: TEST_SCRIPT
+  value: selenium-checker.py

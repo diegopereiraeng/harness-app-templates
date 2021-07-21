@@ -1,0 +1,17 @@
+harnessApiVersion: '1.0'
+type: SHELL_SCRIPT
+scriptBody: |-
+  cat >$PROVISIONER_OUTPUT_PATH  <<_EOF_
+  {
+    "Instances": [
+      {
+        "Hostname": "${public_ip}",
+        "environment": "dev",
+        "artifactversion": "1.0.0"
+      }
+   ]
+  }
+  _EOF_
+variables:
+- name: public_ip
+  valueType: TEXT
